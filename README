@@ -1,0 +1,1083 @@
+TITLE: CS 214 Fall 2025
+PROJECT: Nim
+PROFESSOR: David Menendez
+AUTHOR: Isaiah Allen, Isaiah Guzman
+NETID: ija25, img53
+
+--- Running Tests ---
+
+There is a single Makefile for this program to compile and run all
+parts required.
+
+To compile, while in the P4 directory, execute:
+make
+
+To run the program under a specific port, execute:
+./nimd <port>
+
+To clean all artifacts from the P4 directory, execute:
+make clean
+
+--- nimd.c Implementation Details ---
+
+This section goes over the details of the implementation in nimd.c.
+Before the implementation, some preprocessor directives are included
+to ensure the proper header files are being included. There are a few
+symbolic constants used; all are defined to specify the max size of
+things such as the board's size, the fields of a message, the number
+of games allowed, the message length, and the length of player's names.
+
+This version is the extra credit version of the Nim game.
+
+Several structs and enums are used in this program to help organize
+the data.
+
+ActiveGame:  This struct holds the PID of the active game and the names
+             of the two players, which is 104 characters plus the null
+             terminator.
+             
+Message:     This struct holds the type of the message, which is always
+             4 characters (e.g. PLAY, OVER, etc.), the number of fields,
+             and the strings of the fields themselves, of which
+             MAX_FIELDS is the max.
+             
+Player:      This struct holds the information about a player, specifically
+             their file descriptor and name, which cannot be more than
+             72 characters plus the null terminator.
+             
+Game:        This struct holds information about a particular game.
+             It tracks the players, the game board, and whose turn it
+             currently is.
+
+Connection:  This struct holds information about the ongoing connection,
+             such as its file descriptor, the buffer and its length,
+             the player whose connection this is, and the player's
+             number.
+             
+There are also a few static global variables tracking the list of active
+games, the player who is currently waiting, and the active count of games.
+
+The main() function contains the general logic of the server, with
+template functions included that hold the more specific logic that should
+run under the main() function. Basic things such as the number of arguments
+input by the user and the port number provided are checked. If these are
+correct, then a listen socket is created, and the server begins listening
+on the user-specified port.
+
+Once the server starts listening for connections, it loops infinitely.
+Any completed games are handled immediately to avoid any orphan processes.
+clients are accepted using the accept_client() function and assigned a
+file descriptor. On the first run, the waiting player will be assigned
+and will be awaiting an opponent. Once an opponent is connected, the
+players are set up into their proper Player structs and the process is
+forked.
+
+In this child process, the listening socket is closed, and NAME
+messages are sent to each of the players. Once this occurs, the Game
+struct is set up with game data, such as the game's Player structs,
+the number of the starting player which is 1, and the piles of stones
+in the game board array. Initial PLAY messages are sent to the two
+players, and the game loop logic begins. Once the game is completed,
+FINISH messages are sent, the players' file descriptors are closed
+and their corresponding Player structs have their memory freed.
+
+In the parent process, games are registered in the active games array.
+Up to MAX_GAMES (i.e. 50) games can be handled, which we decided was
+more than enough games to be played concurrently. Static global variables
+that track these games, namely the list of active games and the number
+of active games are updated here.
+
+Now that a proper overview has been given, we will go into some of
+the larger functions in detail.
+
+create_listen_socket():
+  This function simply creates a TCP socket that listens on the port
+  given by the user upon running ./nimd <port>. We resuse ports in the
+  TIME_WAIT state so that testing is easier when running on the same
+  port multiple times within a short period. The address specified is
+  bound to the socket, and listen() is called with a max number of 10
+  potential connections, which is more than enough for our implementation.
+  The function returns the file descriptor for the listening socket.
+
+accept_client():
+  This short function accepts a TCP client using the listening socket.
+  It also uses the inet_ntop() function to convert the IP address to
+  a readable string for logging purposes in the server. The function
+  returns the file descriptor for the TCP client.
+
+parse_message():
+  This function contains the logic to parse messages sent by the clients
+  in the form 0|ML|TYPE|FIELD1|FIELD2|...|FIELD_N|, where 0 is the version,
+  ML is the user-declared length of the message, TYPE is the type of the
+  message (e.g. PLAY, OVER, etc.), and the rest of the fields correspond
+  to whatever syntax is required by the message type. Various requirements
+  must be met:
+  
+  1. Message length needs to at least have 7 characters.
+  2. Version must be 0.
+  3. ML must be 2 digits.
+  4. Message length does not exceed 104 bytes.
+  5. Message ends with a vertical bar.
+  6. TYPE must be 4 digits.
+  7. Fields must end with a vertical bar.
+  
+  Our implementation considers the first 5 characters to be part of the
+  header (X|XX|), which correspond to the game version (i.e. 0) and the
+  message length in bytes, which is always 2 digits. The rest of the
+  message is considered to be the payload.
+  
+  This function goes through and ensures all 7 requirements are met.
+  
+send_xxxx_message():
+  This family of functions sends the appropriate logic for a particular
+  type of message (i.e. PLAY, OVER, etc.). There is really no
+  implementation decision to take note of here, as they all follow a
+  similar format of accepting the file descriptor to send the message
+  to and whatever specific other arguments are needed to produce and
+  send a valid message. The use of ternary operators here helped
+  condense the functions into a much more terse format.
+  
+run_game_loop():
+  This function runs the core game loop for a particular game. The Game
+  struct is passed as an argument to the loop, which runs until the game
+  is finished. An array of size 2 of Connection structs are held for
+  each of the players containing the player's file descriptors, the
+  buffer length, and the Player structs and their player number. Once
+  these are set up, the loop begins, running until a player disconnects,
+  a forfeit occurs, or the game is won normally. We used fd_set to keep
+  track of the set of file descriptors for each connections. Within the
+  game loop, we repeatedly check each connection to see if FD_ISSET,
+  continuing if it is not, or reading the data from the connection's
+  file descriptor if it is set. Disconnections are handled here,
+  otherwise the message is parsed (using the parse_message() function)
+  from the connection's buffer.
+  
+  After the message is parsed for validity, we check other conditions,
+  such as whether the message sent by the user is anything but a move
+  (which is an automatic forfeit), if the player moves out of turn
+  (which is not an automatic forfeit), if the player sends a MOVE with
+  an unexpected number of fields (i.e. anything but 2 fields, which is
+  also an automatic forfeit), and if the pile or quantity numbers sent
+  by the user are not within the bounds of the number of piles (5) or
+  the number of stones contained within that particular pile.
+  
+  Once all of this has been validated, we apply changes to the game
+  board, check to see if the board is empty, and send the appropriate
+  OVER messages if it is empty. Otherwise, we flip the turn back to
+  the other player and the loop begins again.
+  
+name_in_active_game():
+  This function cycles through the list of active games, checking if
+  the player name being passed as an argument is currently being used.
+
+register_child_game():
+  This function registers a child game by updating the active_games
+  global array and the active_count variable as long as the active_count
+  variable has not exceeded MAX_GAMES (i.e. 50).
+
+remove_child_game():
+  This function removes a child game by cycling through the array of
+  active games until a match of the PID is found, then performs the
+  appropriate logic to free the space for another game to be registered.
+
+reap_children():
+  This function reaps zombie child processes created by any of the
+  fork() system calls in the main function.
+  
+handle_handshake():
+  This function performs the handshake with the client connecting to
+  the server. It receives the messages from the TCP stream, validates
+  the initial OPEN message, checks the client's name to ensure it has
+  not already been chosen, sends back a WAIT message to acknowledge
+  state to the client, and then allocates a Player struct. It also
+  performs checks such as checking the message's number of fields to
+  ensure that the player is sending just one field, has any poorly
+  placed vertical bars, and has chosen a unique name that is not being
+  used in other active games when choosing a name. This function then
+  returns the Player struct.
+
+--- nimd.c Test Details ---
+
+We used the given testc and rawc executables for all testing. Each test
+case below shows the proper usage including which executable was run
+for each test.
+
+Some tests required using the nc utility to determine the appropriate
+server response for invalid messages sent by the client.
+
+---
+
+TEST 0: More than 1 CLI argument
+DESCRIPTION: This test demonstrates that an error is reported when
+there is more than one argument passed to the executable.
+
+SERVER
+./nimd 4000 4000
+./nimd accepts a port number as its one argument.
+
+---
+
+TEST 1: Port number out of range
+DESCRIPTION: This test demonstrates that an error is reported when
+when a nonsensical port number is given (outside of 1-65535).
+
+SERVER
+./nimd 70000
+The range of valid port numbers is 1 to 65535.
+
+---
+
+TEST 2: Player disconnects before sending OPEN message
+DESCRIPTION: This test demonstrates that no errors are encountered when
+a player disconnects before sending OPEN.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+^C
+
+SERVER
+Client disconnected during handshake.
+Bad handshake, closing client.
+
+---
+
+TEST 3: Player disconnects after sending OPEN but before matching
+DESCRIPTION: This test demonstrates that no errors are encountered when
+a player disconnects after sending OPEN but before being matched.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./testc localhost 5000 Alice
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+
+CLIENT
+^C
+./testc localhost 5000 Alice
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 5).
+Alice is waiting for an opponent.
+
+---
+
+TEST 4: Valid OPEN message, server returns 
+DESCRIPTION: This test demonstrates that no errors are encountered
+when a valid OPEN message is sent, and the server returns an appropriate
+response of 0|05|WAIT|. 
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+
+SERVER
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+
+---
+
+TEST 5: 10 Invalid reported correctly on incorrect game version
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+on an incorrect game version.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+1|11|OPEN|Alice|
+Sending 16 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 6: 10 Invalid reported correctly on missing vertical bar (after game version)
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+on a missing vertical bar after the game version.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0x11|OPEN|Alice|
+Sending 16 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 7: 10 Invalid reported correctly on non-digit message length field.
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+on a non-digit message length field.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|X1|OPEN|Alice|
+Sending 16 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 8: 10 Invalid reported correctly on missing vertical bar (after message length)
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+on a missing vertical bar after the game version.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+CLIENT
+0|11OPEN|Alice|
+Sending 15 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 9: 10 Invalid reported correctly on bad message length
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+when the given message length is shorter than the actual message length.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|05|OPEN|Alice|
+Sending 16 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 10: 10 Invalid reported correctly on missing last vertical bar
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+when the given message length is shorter than the actual message length.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|10|OPEN|Alice
+Sending 15 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 11: 10 Invalid reported correctly on unknown message type
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+when the message type is unknown.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|11|GORP|Alice|
+Sending 16 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 12: 10 Invalid reported correctly on vertical bar in name
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+when the OPEN message contains a name field with a vertical bar. This
+technically fails because of the number of fields, but it has the exact
+same functionality regardless.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|12|OPEN|Alic|e|
+Sending 17 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+
+
+---
+
+TEST 14: 21 Long Name reported correctly
+DESCRIPTION: This test demonstrates that 21 Long Name is reported
+correctly and the connection is closed.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|79|OPEN|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|
+Sending 84 bytes
+Recv  23 [0|18|FAIL|21 Long Name|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 15: 22 Already Playing reported correctly
+DESCRIPTION: This test demonstrates that 22 Already Playing is reported
+correctly and the connection is closed.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./testc localhost 5000 Alice
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+
+CLIENT 2
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  29 [0|24|FAIL|22 Already Playing|]
+Socket EOF or error
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXXX
+Bad handshake, closing client.
+
+---
+
+TEST 16: 24 Not Playing reported correctly
+DESCRIPTION: This test demonstrates that 24 Not Playing is reported
+correctly and the connection is closed.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT
+./rawc localhost 5000
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+
+CLIENT
+0|09|MOVE|1|1|
+Sending 14 bytes
+Recv  25 [0|20|FAIL|24 Not Playing|]
+Socket EOF or error
+
+SERVER
+Bad handshake, closing client.
+
+---
+
+TEST 17: Match successfully begins and PLAY message is sent
+DESCRIPTION: This test demonstrates that no errors are encountered when
+valid OPEN messages are sent from two clients and a child process is
+spawned. 
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000 Alice
+0|11|OPEN|Alice|
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+
+CLIENT 2
+./testc localhost 5000 Bob
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process 94985 for Alice (P1) vs Bob (P2).
+[PID 94985] START: Alice (P1) vs Bob (P2), next player is P1.
+
+CLIENT 1
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  16 [0|11|NAME|1|Bob|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+
+---
+
+TEST 18: Match successfully prompts and spawns child process
+DESCRIPTION: This test demonstrates that no errors are encountered when
+valid OPEN messages are sent from two clients and a child process is
+spawned.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./testc localhost 5000 Alice
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+
+CLIENT 2
+./testc localhost 5000 Bob
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+
+---
+
+TEST 19: Match successfully completes and OVER message is sent
+DESCRIPTION: This test demonstrates that an OVER message is sent to the
+client upon successful completion of a game.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  16 [0|11|NAME|1|Bob|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|09|MOVE|0|1|
+Sending 14 bytes
+Recv  22 [0|17|PLAY|2|0 3 5 7 9|]
+Recv  22 [0|17|PLAY|1|0 0 5 7 9|]
+0|09|MOVE|2|5|
+Sending 14 bytes
+Recv  22 [0|17|PLAY|2|0 0 0 7 9|]
+Recv  22 [0|17|PLAY|1|0 0 0 0 9|]
+0|09|MOVE|4|9|
+Sending 14 bytes
+Recv  23 [0|18|OVER|1|0 0 0 0 0||]
+Socket EOF or error
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+Board: 0 3 5 7 9.
+Select pile (1-5)
+2
+Select amount (1-3)
+3
+Board: 0 0 5 7 9.
+Waiting for Alice
+Board: 0 0 0 7 9.
+Select pile (1-5)
+4
+Select amount (1-7)
+7
+Board: 0 0 0 0 9.
+Waiting for Alice
+You are defeated.
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] TURN: Alice (P1) removed 1 stones from pile 1. Board is [0 3 5 7 9].
+[PID XXXXX] TURN: Bob (P2) removed 3 stones from pile 2. Board is [0 0 5 7 9].
+[PID XXXXX] TURN: Alice (P1) removed 5 stones from pile 3. Board is [0 0 0 7 9].
+[PID XXXXX] TURN: Bob (P2) removed 7 stones from pile 4. Board is [0 0 0 0 9].
+[PID XXXXX] TURN: Alice (P1) removed 9 stones from pile 5. Board is [0 0 0 0 0].
+[PID XXXXX] OVER: Winner is Alice. Final board is [0 0 0 0 0].
+[PID XXXXX] FINISH: Alice (P1) vs Bob (P2).
+
+---
+
+TEST 20: Player disconnects during active game causes forfeit
+DESCRIPTION: This test demonstrates that a forfeit occurs immediately
+after a player disconects.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./testc localhost 5000 Alice
+Waiting to play
+We are player 1; opponent Bob
+Board: 1 3 5 7 9.
+Select pile (1-5)
+Bob forfeits.
+Board: 1 3 5 7 9
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+^C
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] FORFEIT: Bob (P2) disconnected. Winner is Alice (P1).
+[PID XXXXX] FINISH: Alice (P1) vs Bob (P2).
+
+---
+
+TEST 21: 23 Already Open reported correctly
+DESCRIPTION: This test demonstrates that the 23 Already Open message
+is correctly reported when a player sends an OPEN message during an
+active game.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  16 [0|11|NAME|1|Bob|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  26 [0|21|FAIL|23 Already Open|]
+Socket EOF or error
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+Alice forfeits.
+Board: 1 3 5 7 9
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 5).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 4).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] FORFEIT: Alice (P1) sent unexpected message type 'OPEN'. Winner is Bob (P2).
+[PID XXXXX] FINISH: Alice (P1) vs Bob (P2).
+
+---
+TEST 22: 31 Impatient reported correctly
+DESCRIPTION: This test demonstrates that 31 Impatient is reported
+correctly and the connection remains open.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  16 [0|11|NAME|1|Bob|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|09|MOVE|1|1|
+Sending 14 bytes
+Recv  22 [0|17|PLAY|2|1 2 5 7 9|]
+0|09|MOVE|2|3|
+Sending 14 bytes
+Recv  23 [0|18|FAIL|31 Impatient|]
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+Board: 1 2 5 7 9.
+Select pile (1-5)
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] TURN: Alice (P1) removed 1 stones from pile 2. Board is [1 2 5 7 9].
+[PID XXXXX] IMPATIENT: Alice (P1) tried to MOVE out of turn.
+
+---
+
+TEST 23: 32 Pile Index reported correctly
+DESCRIPTION: This test demonstrates that 32 Pile Index is reported
+correctly and the connection remains open.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  16 [0|11|NAME|1|Bob|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|09|MOVE|6|9|
+Sending 14 bytes
+Recv  24 [0|19|FAIL|32 Pile Index|]
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] Invalid move from Alice (P1). Pile 2 has 3 stones (tried removing 4).
+
+---
+
+TEST 24: 33 Quantity reported correctly
+DESCRIPTION: This test demonstrates that 33 Quantity is reported
+correctly and the connection remains open.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  16 [0|11|NAME|1|Bob|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|09|MOVE|0|2|
+Sending 14 bytes
+Recv  22 [0|17|FAIL|33 Quantity|]
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] Invalid move from Alice (P1). Pile 7 does not exist.
+
+---
+
+TEST 25: 10 Invalid reported correctly on bad syntax MOVE mid-game
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+when a MOVE is sent with bad syntax mid-game, and the connection is 
+consequently closed.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|07|MOVE|1|
+Sending 12 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+Alice forfeits.
+Board: 1 3 5 7 9
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID XXXXX] FORFEIT: Alice (P1) sent MOVE with 1 fields (expected 2). Winner is Bob (P2).
+[PID XXXXX] FINISH: Alice (P1) vs Bob (P2).
+
+---
+
+TEST 26: 10 Invalid reported correctly on unknown message type mid-game
+DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
+when a message is sent with unknown type mid-game, and the connection is
+consequently closed.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./rawc localhost 5000
+0|11|OPEN|Alice|
+Sending 16 bytes
+Recv  10 [0|05|WAIT|]
+Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
+0|07|GORP|1|
+Sending 12 bytes
+Recv  21 [0|16|FAIL|10 Invalid|]
+Socket EOF or error
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+We are player 2; opponent Alice
+Board: 1 3 5 7 9.
+Waiting for Alice
+Alice forfeits.
+Board: 1 3 5 7 9
+
+SERVER
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process XXXXX for Alice (P1) vs Bob (P2).
+[PID XXXXX] START: Alice (P1) vs Bob (P2), next player is P1.
+[PID 165370] FORFEIT: Alice (P1) sent unexpected message type 'GORP'. Winner is Bob (P2).
+[PID 165370] FINISH: Alice (P1) vs Bob (P2).
+
+---
+
+TEST 27: Multiple games simultaneously
+DESCRIPTION: This test demonstrates that the server can host multiple
+games simultaneously in child processes.
+
+SERVER
+./nimd 5000
+Now listening on port 5000.
+
+CLIENT 1
+./testc localhost 5000 Alice
+Waiting to play
+
+CLIENT 2
+./testc localhost 5000 Bob
+Waiting to play
+
+SERVER
+Incoming connection from 127.0.0.1:WWWWW
+Handshake successful for Alice (fd 4).
+Alice is waiting for an opponent.
+Incoming connection from 127.0.0.1:XXXXX
+Handshake successful for Bob (fd 5).
+Matching players: Alice with Bob.
+Spawned game process AAAAA for Alice (P1) vs Bob (P2).
+[PID AAAAA] START: Alice (P1) vs Bob (P2), next player is P1.
+
+CLIENT 3
+./testc localhost 5000 Charlie
+Waiting to play
+
+CLIENT 4
+./testc localhost 5000 David
+Waiting to play
+
+SERVER
+Incoming connection from 127.0.0.1:YYYYY
+Handshake successful for Charlie (fd 4).
+Charlie is waiting for an opponent.
+Incoming connection from 127.0.0.1:ZZZZZ
+Handshake successful for David (fd 5).
+Matching players: Charlie with David.
+Spawned game process BBBBB for Charlie (P1) vs David (P2).
+[PID BBBBB] START: Charlie (P1) vs David (P2), next player is P1.
+
+CLIENT 1
+We are player 1; opponent Bob
+Board: 1 3 5 7 9.
+Select pile (1-5)
+1
+Select amount (1-1)
+1
+Board: 0 3 5 7 9.
+Waiting for Bob
+
+CLIENT 3
+We are player 1; opponent David
+Board: 1 3 5 7 9.
+Select pile (1-5)
+2
+Select amount (1-3)
+2
+Board: 1 1 5 7 9.
+Waiting for David
+
+SERVER
+[PID AAAAA] TURN: Alice (P1) removed 1 stones from pile 1. Board is [0 3 5 7 9].
+[PID BBBBB] TURN: Charlie (P1) removed 2 stones from pile 2. Board is [1 1 5 7 9].
+
+---
