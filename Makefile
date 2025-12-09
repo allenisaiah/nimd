@@ -7,7 +7,7 @@ all: nimd
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-nimd: mysh.o arraylist.o
+nimd: nimd.o
 	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $^
 
 clean:
