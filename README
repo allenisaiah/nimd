@@ -202,9 +202,6 @@ We used the given testc and rawc executables for all testing. Each test
 case below shows the proper usage including which executable was run
 for each test.
 
-Some tests required using the nc utility to determine the appropriate
-server response for invalid messages sent by the client.
-
 ---
 
 TEST 0: More than 1 CLI argument
@@ -504,11 +501,7 @@ Bad handshake, closing client.
 
 ---
 
-
-
----
-
-TEST 14: 21 Long Name reported correctly
+TEST 13: 21 Long Name reported correctly
 DESCRIPTION: This test demonstrates that 21 Long Name is reported
 correctly and the connection is closed.
 
@@ -533,7 +526,7 @@ Bad handshake, closing client.
 
 ---
 
-TEST 15: 22 Already Playing reported correctly
+TEST 14: 22 Already Playing reported correctly
 DESCRIPTION: This test demonstrates that 22 Already Playing is reported
 correctly and the connection is closed.
 
@@ -562,7 +555,7 @@ Bad handshake, closing client.
 
 ---
 
-TEST 16: 24 Not Playing reported correctly
+TEST 15: 24 Not Playing reported correctly
 DESCRIPTION: This test demonstrates that 24 Not Playing is reported
 correctly and the connection is closed.
 
@@ -587,7 +580,7 @@ Bad handshake, closing client.
 
 ---
 
-TEST 17: Match successfully begins and PLAY message is sent
+TEST 16: Match successfully begins and PLAY message is sent
 DESCRIPTION: This test demonstrates that no errors are encountered when
 valid OPEN messages are sent from two clients and a child process is
 spawned. 
@@ -623,7 +616,7 @@ Recv  22 [0|17|PLAY|1|1 3 5 7 9|]
 
 ---
 
-TEST 18: Match successfully prompts and spawns child process
+TEST 17: Match successfully prompts and spawns child process
 DESCRIPTION: This test demonstrates that no errors are encountered when
 valid OPEN messages are sent from two clients and a child process is
 spawned.
@@ -652,7 +645,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 19: Match successfully completes and OVER message is sent
+TEST 18: Match successfully completes and OVER message is sent
 DESCRIPTION: This test demonstrates that an OVER message is sent to the
 client upon successful completion of a game.
 
@@ -721,7 +714,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 20: Player disconnects during active game causes forfeit
+TEST 19: Player disconnects during active game causes forfeit
 DESCRIPTION: This test demonstrates that a forfeit occurs immediately
 after a player disconects.
 
@@ -760,7 +753,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 21: 23 Already Open reported correctly
+TEST 20: 23 Already Open reported correctly
 DESCRIPTION: This test demonstrates that the 23 Already Open message
 is correctly reported when a player sends an OPEN message during an
 active game.
@@ -803,7 +796,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 [PID XXXXX] FINISH: Alice (P1) vs Bob (P2).
 
 ---
-TEST 22: 31 Impatient reported correctly
+TEST 21: 31 Impatient reported correctly
 DESCRIPTION: This test demonstrates that 31 Impatient is reported
 correctly and the connection remains open.
 
@@ -848,7 +841,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 23: 32 Pile Index reported correctly
+TEST 22: 32 Pile Index reported correctly
 DESCRIPTION: This test demonstrates that 32 Pile Index is reported
 correctly and the connection remains open.
 
@@ -887,7 +880,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 24: 33 Quantity reported correctly
+TEST 23: 33 Quantity reported correctly
 DESCRIPTION: This test demonstrates that 33 Quantity is reported
 correctly and the connection remains open.
 
@@ -926,7 +919,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 25: 10 Invalid reported correctly on bad syntax MOVE mid-game
+TEST 24: 10 Invalid reported correctly on bad syntax MOVE mid-game
 DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
 when a MOVE is sent with bad syntax mid-game, and the connection is 
 consequently closed.
@@ -969,7 +962,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 26: 10 Invalid reported correctly on unknown message type mid-game
+TEST 25: 10 Invalid reported correctly on unknown message type mid-game
 DESCRIPTION: This test demonstrates that 10 Invalid is reported correctly
 when a message is sent with unknown type mid-game, and the connection is
 consequently closed.
@@ -1012,7 +1005,7 @@ Spawned game process XXXXX for Alice (P1) vs Bob (P2).
 
 ---
 
-TEST 27: Multiple games simultaneously
+TEST 26: Multiple games simultaneously
 DESCRIPTION: This test demonstrates that the server can host multiple
 games simultaneously in child processes.
 
