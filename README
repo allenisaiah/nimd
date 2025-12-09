@@ -4,7 +4,7 @@ PROFESSOR: David Menendez
 AUTHOR: Isaiah Allen, Isaiah Guzman
 NETID: ija25, img53
 
---- Running Tests ---
+--- Compiling and Executing ---
 
 There is a single Makefile for this program to compile and run all
 parts required.
